@@ -108,73 +108,150 @@ class MarketAnalyzer:
         self.search_service = search_service
         self.analyzer = analyzer
         
-    def get_market_overview(self) -> MarketOverview:
+    def get_market_overview(self, target_date: Optional[str] = None) -> MarketOverview:
         """
         获取市场概览数据
-        
+
+        Args:
+            target_date: 目标日期，格式：YYYYMMDD 或 YYYY-MM-DD（可选，默认为今天）
+
         Returns:
             MarketOverview: 市场概览数据对象
         """
-        today = datetime.now().strftime('%Y-%m-%d')
-        overview = MarketOverview(date=today)
-        
+        # 标准化日期格式
+        if target_date:
+            # 移除可能的连字符
+            date_str = target_date.replace('-', '')
+            # 转换为 YYYY-MM-DD 格式
+            if len(date_str) == 8:
+                formatted_date = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
+            else:
+                formatted_date = target_date
+        else:
+            formatted_date = datetime.now().strftime('%Y-%m-%d')
+
+        overview = MarketOverview(date=formatted_date)
+
         # 1. 获取主要指数行情
-        overview.indices = self._get_main_indices()
-        
+        overview.indices = self._get_main_indices(target_date=target_date)
+
         # 2. 获取涨跌统计
         self._get_market_statistics(overview)
-        
+
         # 3. 获取板块涨跌榜
         self._get_sector_rankings(overview)
-        
+
         # 4. 获取北向资金（可选）
         self._get_north_flow(overview)
-        
+
         return overview
     
-    def _get_main_indices(self) -> List[MarketIndex]:
-        """获取主要指数实时行情"""
+    def _get_main_indices(self, target_date: Optional[str] = None) -> List[MarketIndex]:
+        """
+        获取主要指数行情
+
+        Args:
+            target_date: 目标日期，格式：YYYYMMDD 或 YYYY-MM-DD（可选，默认为今天实时数据）
+
+        Returns:
+            指数列表
+        """
         indices = []
-        
+
         try:
-            logger.info("[大盘] 获取主要指数实时行情...")
-            
-            # 使用 akshare 获取指数行情
-            df = ak.stock_zh_index_spot_em()
-            
-            if df is not None and not df.empty:
+            if target_date:
+                # 获取历史数据
+                logger.info(f"[大盘] 获取 {target_date} 的历史指数数据...")
+                # 标准化日期格式为 YYYYMMDD
+                date_str = target_date.replace('-', '')
+
                 for code, name in self.MAIN_INDICES.items():
-                    # 查找对应指数
-                    row = df[df['代码'] == code]
-                    if row.empty:
-                        # 尝试带前缀查找
-                        row = df[df['代码'].str.contains(code)]
-                    
-                    if not row.empty:
-                        row = row.iloc[0]
-                        index = MarketIndex(
-                            code=code,
-                            name=name,
-                            current=float(row.get('最新价', 0) or 0),
-                            change=float(row.get('涨跌额', 0) or 0),
-                            change_pct=float(row.get('涨跌幅', 0) or 0),
-                            open=float(row.get('今开', 0) or 0),
-                            high=float(row.get('最高', 0) or 0),
-                            low=float(row.get('最低', 0) or 0),
-                            prev_close=float(row.get('昨收', 0) or 0),
-                            volume=float(row.get('成交量', 0) or 0),
-                            amount=float(row.get('成交额', 0) or 0),
-                        )
-                        # 计算振幅
-                        if index.prev_close > 0:
-                            index.amplitude = (index.high - index.low) / index.prev_close * 100
-                        indices.append(index)
-                        
-                logger.info(f"[大盘] 获取到 {len(indices)} 个指数行情")
-                
+                    try:
+                        # 使用 akshare 获取指数历史数据
+                        df = ak.stock_zh_index_daily(symbol=f"sh{code}" if code.startswith('0') else f"sz{code}")
+
+                        if df is not None and not df.empty:
+                            # 查找指定日期的数据
+                            df['date'] = pd.to_datetime(df['date']).dt.strftime('%Y%m%d')
+                            target_row = df[df['date'] == date_str]
+
+                            if not target_row.empty:
+                                row = target_row.iloc[0]
+                                # 获取前一交易日数据用于计算涨跌
+                                row_idx = df[df['date'] == date_str].index[0]
+                                if row_idx > 0:
+                                    prev_row = df.iloc[row_idx - 1]
+                                    prev_close = float(prev_row.get('close', 0) or 0)
+                                else:
+                                    prev_close = float(row.get('close', 0) or 0)
+
+                                current_price = float(row.get('close', 0) or 0)
+                                change = current_price - prev_close
+                                change_pct = (change / prev_close * 100) if prev_close > 0 else 0
+
+                                index = MarketIndex(
+                                    code=code,
+                                    name=name,
+                                    current=current_price,
+                                    change=change,
+                                    change_pct=change_pct,
+                                    open=float(row.get('open', 0) or 0),
+                                    high=float(row.get('high', 0) or 0),
+                                    low=float(row.get('low', 0) or 0),
+                                    prev_close=prev_close,
+                                    volume=float(row.get('volume', 0) or 0),
+                                    amount=float(row.get('amount', 0) or 0),
+                                )
+                                # 计算振幅
+                                if index.prev_close > 0:
+                                    index.amplitude = (index.high - index.low) / index.prev_close * 100
+                                indices.append(index)
+                            else:
+                                logger.warning(f"[大盘] 未找到 {name}({code}) 在 {target_date} 的数据")
+                    except Exception as e:
+                        logger.warning(f"[大盘] 获取 {name}({code}) 历史数据失败: {e}")
+                        continue
+
+            else:
+                # 获取实时数据
+                logger.info("[大盘] 获取主要指数实时行情...")
+
+                # 使用 akshare 获取指数行情
+                df = ak.stock_zh_index_spot_em()
+
+                if df is not None and not df.empty:
+                    for code, name in self.MAIN_INDICES.items():
+                        # 查找对应指数
+                        row = df[df['代码'] == code]
+                        if row.empty:
+                            # 尝试带前缀查找
+                            row = df[df['代码'].str.contains(code)]
+
+                        if not row.empty:
+                            row = row.iloc[0]
+                            index = MarketIndex(
+                                code=code,
+                                name=name,
+                                current=float(row.get('最新价', 0) or 0),
+                                change=float(row.get('涨跌额', 0) or 0),
+                                change_pct=float(row.get('涨跌幅', 0) or 0),
+                                open=float(row.get('今开', 0) or 0),
+                                high=float(row.get('最高', 0) or 0),
+                                low=float(row.get('最低', 0) or 0),
+                                prev_close=float(row.get('昨收', 0) or 0),
+                                volume=float(row.get('成交量', 0) or 0),
+                                amount=float(row.get('成交额', 0) or 0),
+                            )
+                            # 计算振幅
+                            if index.prev_close > 0:
+                                index.amplitude = (index.high - index.low) / index.prev_close * 100
+                            indices.append(index)
+
+            logger.info(f"[大盘] 获取到 {len(indices)} 个指数行情")
+
         except Exception as e:
             logger.error(f"[大盘] 获取指数行情失败: {e}")
-        
+
         return indices
     
     def _get_market_statistics(self, overview: MarketOverview):
@@ -501,24 +578,27 @@ class MarketAnalyzer:
 """
         return report
     
-    def run_daily_review(self) -> str:
+    def run_daily_review(self, target_date: Optional[str] = None) -> str:
         """
         执行每日大盘复盘流程
-        
+
+        Args:
+            target_date: 目标日期，格式：YYYYMMDD 或 YYYY-MM-DD（可选，默认为今天）
+
         Returns:
             复盘报告文本
         """
         logger.info("========== 开始大盘复盘分析 ==========")
-        
+
         # 1. 获取市场概览
-        overview = self.get_market_overview()
-        
+        overview = self.get_market_overview(target_date=target_date)
+
         # 2. 搜索市场新闻
         news = self.search_market_news()
-        
+
         # 3. 生成复盘报告
         report = self.generate_market_review(overview, news)
-        
+
         logger.info("========== 大盘复盘分析完成 ==========")
         
         return report

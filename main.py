@@ -587,6 +587,59 @@ class StockAnalysisPipeline:
             logger.error(f"显示结果失败: {e}")
 
 
+def parse_date_range(args: argparse.Namespace) -> tuple[Optional[str], Optional[str], int]:
+    """
+    解析日期范围参数
+
+    Args:
+        args: 命令行参数
+
+    Returns:
+        (start_date, end_date, days): 开始日期、结束日期、天数
+    """
+    from datetime import datetime, timedelta
+
+    # 标准化日期格式函数
+    def normalize_date(date_str: str) -> str:
+        """将 YYYYMMDD 或 YYYY-MM-DD 格式转换为 YYYY-MM-DD"""
+        if not date_str:
+            return None
+        date_str = date_str.replace('-', '')
+        if len(date_str) == 8:
+            return f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
+        return date_str
+
+    # 处理 end_date
+    end_date = normalize_date(args.end_date) if args.end_date else datetime.now().strftime('%Y-%m-%d')
+
+    # 处理 start_date 和 period
+    if args.start_date:
+        # 如果指定了 start_date，直接使用
+        start_date = normalize_date(args.start_date)
+        days = None
+    elif args.period:
+        # 根据 period 计算 start_date
+        period_map = {
+            '5d': 5,
+            '1w': 7,
+            '2w': 14,
+            '1m': 30,
+            '3m': 90,
+            '6m': 180,
+            '1y': 365
+        }
+        days = period_map.get(args.period, 30)
+        end_dt = datetime.strptime(end_date, '%Y-%m-%d')
+        start_dt = end_dt - timedelta(days=days * 2)  # 乘以2以确保有足够的交易日
+        start_date = start_dt.strftime('%Y-%m-%d')
+    else:
+        # 默认使用 30 天
+        start_date = None
+        days = 30
+
+    return start_date, end_date, days
+
+
 def parse_arguments() -> argparse.Namespace:
     """解析命令行参数"""
     parser = argparse.ArgumentParser(
@@ -601,6 +654,9 @@ def parse_arguments() -> argparse.Namespace:
   python main.py --no-notify        # 不发送推送通知
   python main.py --schedule         # 启用定时任务模式
   python main.py --market-review    # 仅运行大盘复盘
+  python main.py --market-review --date 20260114  # 分析指定日期的大盘数据
+  python main.py --stocks 600519 --period 1m  # 分析个股近1月数据
+  python main.py --stocks 600519 --start-date 20260101 --end-date 20260114  # 分析个股指定时间段
         '''
     )
     
@@ -652,39 +708,73 @@ def parse_arguments() -> argparse.Namespace:
         action='store_true',
         help='跳过大盘复盘分析'
     )
-    
+
+    parser.add_argument(
+        '--date',
+        type=str,
+        default=None,
+        help='指定分析日期，格式：YYYYMMDD 或 YYYY-MM-DD（默认为今天）'
+    )
+
+    parser.add_argument(
+        '--period',
+        type=str,
+        default=None,
+        choices=['5d', '1w', '2w', '1m', '3m', '6m', '1y'],
+        help='指定分析周期：5d(5天), 1w(1周), 2w(2周), 1m(1月), 3m(3月), 6m(6月), 1y(1年)'
+    )
+
+    parser.add_argument(
+        '--start-date',
+        type=str,
+        default=None,
+        help='指定开始日期，格式：YYYYMMDD 或 YYYY-MM-DD'
+    )
+
+    parser.add_argument(
+        '--end-date',
+        type=str,
+        default=None,
+        help='指定结束日期，格式：YYYYMMDD 或 YYYY-MM-DD（默认为今天）'
+    )
+
     return parser.parse_args()
 
 
-def run_market_review(notifier: NotificationService, analyzer=None, search_service=None) -> Optional[str]:
+def run_market_review(notifier: NotificationService, analyzer=None, search_service=None, target_date: Optional[str] = None) -> Optional[str]:
     """
     执行大盘复盘分析
-    
+
     Args:
         notifier: 通知服务
         analyzer: AI分析器（可选）
         search_service: 搜索服务（可选）
-    
+        target_date: 目标日期，格式：YYYYMMDD 或 YYYY-MM-DD（可选，默认为今天）
+
     Returns:
         复盘报告文本
     """
     logger.info("开始执行大盘复盘分析...")
-    
+
     try:
         market_analyzer = MarketAnalyzer(
             search_service=search_service,
             analyzer=analyzer
         )
-        
+
         # 执行复盘
-        review_report = market_analyzer.run_daily_review()
-        
+        review_report = market_analyzer.run_daily_review(target_date=target_date)
+
         if review_report:
             # 保存报告到文件
-            date_str = datetime.now().strftime('%Y%m%d')
+            if target_date:
+                # 标准化日期格式
+                date_str = target_date.replace('-', '')
+            else:
+                date_str = datetime.now().strftime('%Y%m%d')
             report_filename = f"market_review_{date_str}.md"
             filepath = notifier.save_report_to_file(
-                f"# 🎯 大盘复盘\n\n{review_report}", 
+                f"# 🎯 大盘复盘\n\n{review_report}",
                 report_filename
             )
             logger.info(f"大盘复盘报告已保存: {filepath}")
@@ -808,8 +898,8 @@ def main() -> int:
             
             if config.gemini_api_key:
                 analyzer = GeminiAnalyzer(api_key=config.gemini_api_key)
-            
-            run_market_review(notifier, analyzer, search_service)
+
+            run_market_review(notifier, analyzer, search_service, target_date=args.date)
             return 0
         
         # 模式2: 定时任务模式

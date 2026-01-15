@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "lastUpdated": 1768415537879,
+  "plugins": [
+    {
+      "filename": "analyze",
+      "type": "skill",
+      "metadata": {
+        "sourcePath": "skills/analyze",
+        "filename": "analyze",
+        "name": "analyze",
+        "description": "智能股票分析工具。支持多股票批量分析、实时进度反馈、分层报告展示。当用户请求分析股票时使用。",
+        "category": "skills",
+        "type": "skill",
+        "size": 13911,
+        "contentHash": "70550ad53a5ce6ca54df11db771fcfe0ddbd29cbdeafd2cb3f50387f503d149a"
+      }
+    }
+  ]
+}
