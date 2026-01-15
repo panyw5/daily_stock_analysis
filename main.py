@@ -465,6 +465,13 @@ class StockAnalysisPipeline:
                     f"[{code}] 分析完成: {result.operation_advice}, "
                     f"评分 {result.sentiment_score}"
                 )
+                
+                if result and result.success:
+                    try:
+                        self.db.save_analysis_result(result, date.today())
+                        logger.info(f"[{code}] ✅ 分析结果已保存到数据库")
+                    except Exception as e:
+                        logger.warning(f"[{code}] ⚠️ 保存分析结果失败: {e}")
             
             return result
             

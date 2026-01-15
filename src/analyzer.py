@@ -13,6 +13,7 @@ A股自选股智能分析系统 - AI分析层
 import json
 import logging
 import time
+import re
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, List
 
@@ -23,6 +24,7 @@ from tenacity import (
     retry_if_exception_type,
     before_sleep_log,
 )
+from demjson3 import decode as demjson_decode
 
 from src.config import get_config
 
@@ -1064,8 +1066,11 @@ class GeminiAnalyzer:
         解析 Gemini 响应（决策仪表盘版）
         
         尝试从响应中提取 JSON 格式的分析结果，包含 dashboard 字段
-        如果解析失败，尝试智能提取或返回默认结果
+        增强容错：使用多种 JSON 解析方式，确保新闻数据不被丢失
         """
+        dashboard = None
+        data = None
+        
         try:
             # 清理响应文本：移除 markdown 代码块标记
             cleaned_text = response_text
@@ -1084,72 +1089,220 @@ class GeminiAnalyzer:
                 # 尝试修复常见的 JSON 问题
                 json_str = self._fix_json_string(json_str)
                 
-                data = json.loads(json_str)
+                # 尝试多种 JSON 解析方式
+                parse_errors = []
                 
-                # 提取 dashboard 数据
-                dashboard = data.get('dashboard', None)
+                try:
+                    # 方式1: 标准 JSON
+                    data = json.loads(json_str)
+                except json.JSONDecodeError as e1:
+                    parse_errors.append(f'标准JSON: {e1}')
+                    
+                    try:
+                        # 方式2: demjson3（更宽松的解析）
+                        data = demjson_decode(json_str)
+                        logger.info(f"使用 demjson3 成功解析 JSON")
+                    except Exception as e2:
+                        parse_errors.append(f'demjson3: {e2}')
+                        
+                        try:
+                            # 方式3: 修复尾随逗号后重试
+                            import re
+                            fixed_json = re.sub(r',\s*}', '}', json_str)
+                            fixed_json = re.sub(r',\s*]', ']', fixed_json)
+                            data = json.loads(fixed_json)
+                            logger.info(f"使用尾随逗号修复成功解析 JSON")
+                        except Exception as e3:
+                            parse_errors.append(f'尾随逗号修复: {e3}')
+                            # 所有解析方式都失败
+                            raise Exception(f"所有 JSON 解析方式均失败: {'; '.join(parse_errors)}")
                 
-                # 解析所有字段，使用默认值防止缺失
-                return AnalysisResult(
-                    code=code,
-                    name=name,
-                    # 核心指标
-                    sentiment_score=int(data.get('sentiment_score', 50)),
-                    trend_prediction=data.get('trend_prediction', '震荡'),
-                    operation_advice=data.get('operation_advice', '持有'),
-                    confidence_level=data.get('confidence_level', '中'),
-                    # 决策仪表盘
-                    dashboard=dashboard,
-                    # 走势分析
-                    trend_analysis=data.get('trend_analysis', ''),
-                    short_term_outlook=data.get('short_term_outlook', ''),
-                    medium_term_outlook=data.get('medium_term_outlook', ''),
-                    # 技术面
-                    technical_analysis=data.get('technical_analysis', ''),
-                    ma_analysis=data.get('ma_analysis', ''),
-                    volume_analysis=data.get('volume_analysis', ''),
-                    pattern_analysis=data.get('pattern_analysis', ''),
-                    # 基本面
-                    fundamental_analysis=data.get('fundamental_analysis', ''),
-                    sector_position=data.get('sector_position', ''),
-                    company_highlights=data.get('company_highlights', ''),
-                    # 情绪面/消息面
-                    news_summary=data.get('news_summary', ''),
-                    market_sentiment=data.get('market_sentiment', ''),
-                    hot_topics=data.get('hot_topics', ''),
-                    # 综合
-                    analysis_summary=data.get('analysis_summary', '分析完成'),
-                    key_points=data.get('key_points', ''),
-                    risk_warning=data.get('risk_warning', ''),
-                    buy_reason=data.get('buy_reason', ''),
-                    # 元数据
-                    search_performed=data.get('search_performed', False),
-                    data_sources=data.get('data_sources', '技术面数据'),
-                    success=True,
-                )
+                if data:
+                    # 提取 dashboard 数据
+                    dashboard = data.get('dashboard', None)
+                    
+                    # 从 dashboard 中提取新闻相关字段（如果 news_summary 为空）
+                    news_summary = data.get('news_summary', '')
+                    if not news_summary and dashboard and 'intelligence' in dashboard:
+                        news_summary = dashboard.get('intelligence', {}).get('latest_news', '')
+                    if not news_summary:
+                        news_summary = data.get('news_summary', '')
+                    
+                    # 从 dashboard 中提取市场情绪和热点（如果为空）
+                    market_sentiment = data.get('market_sentiment', '')
+                    if not market_sentiment and dashboard and 'intelligence' in dashboard:
+                        market_sentiment = dashboard.get('intelligence', {}).get('sentiment_summary', '')
+                    
+                    hot_topics = data.get('hot_topics', '')
+                    if not hot_topics and dashboard and 'intelligence' in dashboard:
+                        positive_catalysts = dashboard.get('intelligence', {}).get('positive_catalysts', [])
+                        if positive_catalysts:
+                            hot_topics = '; '.join(positive_catalysts[:3])
+                    
+                    # 解析所有字段，使用默认值防止缺失
+                    return AnalysisResult(
+                        code=code,
+                        name=name,
+                        # 核心指标
+                        sentiment_score=int(data.get('sentiment_score', 50)),
+                        trend_prediction=data.get('trend_prediction', '震荡'),
+                        operation_advice=data.get('operation_advice', '持有'),
+                        confidence_level=data.get('confidence_level', '中'),
+                        # 决策仪表盘
+                        dashboard=dashboard,
+                        # 走势分析
+                        trend_analysis=data.get('trend_analysis', ''),
+                        short_term_outlook=data.get('short_term_outlook', ''),
+                        medium_term_outlook=data.get('medium_term_outlook', ''),
+                        # 技术面
+                        technical_analysis=data.get('technical_analysis', ''),
+                        ma_analysis=data.get('ma_analysis', ''),
+                        volume_analysis=data.get('volume_analysis', ''),
+                        pattern_analysis=data.get('pattern_analysis', ''),
+                        # 基本面
+                        fundamental_analysis=data.get('fundamental_analysis', ''),
+                        sector_position=data.get('sector_position', ''),
+                        company_highlights=data.get('company_highlights', ''),
+                        # 情绪面/消息面（从 dashboard 提取）
+                        news_summary=news_summary,
+                        market_sentiment=market_sentiment,
+                        hot_topics=hot_topics,
+                        # 综合
+                        analysis_summary=data.get('analysis_summary', '分析完成'),
+                        key_points=data.get('key_points', ''),
+                        risk_warning=data.get('risk_warning', ''),
+                        buy_reason=data.get('buy_reason', ''),
+                        # 元数据
+                        search_performed=data.get('search_performed', False),
+                        data_sources=data.get('data_sources', '技术面数据'),
+                        success=True,
+                    )
             else:
                 # 没有找到 JSON，尝试从纯文本中提取信息
                 logger.warning(f"无法从响应中提取 JSON，使用原始文本分析")
                 return self._parse_text_response(response_text, code, name)
                 
-        except json.JSONDecodeError as e:
+        except Exception as e:
             logger.warning(f"JSON 解析失败: {e}，尝试从文本提取")
-            return self._parse_text_response(response_text, code, name)
+            # 失败后尝试从原始响应中提取 dashboard
+            extracted_result = self._parse_text_response(response_text, code, name)
+            
+            # 尝试从原始文本中提取可能的 dashboard 内容作为备选
+            if not extracted_result.news_summary and response_text:
+                try:
+                    # 查找可能包含新闻的部分
+                    import re
+                    news_match = re.search(r'"latest_news":\s*"([^"]{50,300})"', response_text)
+                    if news_match:
+                        extracted_result.news_summary = news_match.group(1)
+                        logger.info(f"从原文提取到 news_summary: {extracted_result.news_summary[:50]}...")
+                except Exception:
+                    pass
+            
+            return extracted_result
     
     def _fix_json_string(self, json_str: str) -> str:
-        """修复常见的 JSON 格式问题"""
+        """
+        增强的 JSON 修复方法
+        
+        处理：
+        1. 移除注释
+        2. 修复尾随逗号
+        3. 修复布尔值
+        4. 转义字符串中的换行符
+        5. 替换中文引号为英文引号
+        6. 检测并修复截断的 JSON
+        """
         import re
         
-        # 移除注释
+        # 1. 移除注释
         json_str = re.sub(r'//.*?\n', '\n', json_str)
         json_str = re.sub(r'/\*.*?\*/', '', json_str, flags=re.DOTALL)
         
-        # 修复尾随逗号
+        # 2. 修复尾随逗号
         json_str = re.sub(r',\s*}', '}', json_str)
         json_str = re.sub(r',\s*]', ']', json_str)
         
-        # 确保布尔值是小写
+        # 3. 确保布尔值是小写
         json_str = json_str.replace('True', 'true').replace('False', 'false')
+        
+        # 4. 转义字符串中的换行符和特殊字符
+        def escape_string_content(text):
+            """转义 JSON 字符串中的特殊字符"""
+            result = []
+            in_string = False
+            escape_next = False
+            
+            for i, char in enumerate(text):
+                if escape_next:
+                    result.append(char)
+                    escape_next = False
+                    continue
+                
+                if char == '\\':
+                    result.append(char)
+                    escape_next = True
+                    continue
+                
+                if char == '"':
+                    in_string = not in_string
+                    result.append(char)
+                    continue
+                
+                # 在字符串内部转义特殊字符
+                if in_string:
+                    if char == '\n':
+                        result.append('\\n')
+                    elif char == '\r':
+                        result.append('\\r')
+                    elif char == '\t':
+                        result.append('\\t')
+                    else:
+                        result.append(char)
+                else:
+                    result.append(char)
+            
+            return ''.join(result)
+        
+        json_str = escape_string_content(json_str)
+        
+        # 5. 处理字符串值中的引号问题
+        # 注意：由于 escape_string_content 已经处理了转义，这里不需要额外处理
+        # 但是如果 LLM 返回的 JSON 中字符串值包含未转义的引号，会导致解析失败
+        # 这种情况下，我们依赖 demjson3 的宽松解析能力
+        
+        # 6. 检测并修复截断的 JSON
+        # 统计括号平衡
+        open_braces = json_str.count('{') - json_str.count('}')
+        open_brackets = json_str.count('[') - json_str.count(']')
+        
+        # 检查最后一个字符串是否未闭合
+        # 简单方法：统计未转义的引号数量
+        quote_count = 0
+        escape_next = False
+        for char in json_str:
+            if escape_next:
+                escape_next = False
+                continue
+            if char == '\\':
+                escape_next = True
+                continue
+            if char == '"':
+                quote_count += 1
+        
+        # 如果引号数量是奇数，说明有未闭合的字符串
+        if quote_count % 2 == 1:
+            json_str += '"'
+            logger.debug("修复了未闭合的字符串")
+        
+        # 补全未闭合的括号
+        if open_braces > 0:
+            json_str += '}' * open_braces
+            logger.debug(f"补全了 {open_braces} 个未闭合的大括号")
+        
+        if open_brackets > 0:
+            json_str += ']' * open_brackets
+            logger.debug(f"补全了 {open_brackets} 个未闭合的方括号")
         
         return json_str
     
