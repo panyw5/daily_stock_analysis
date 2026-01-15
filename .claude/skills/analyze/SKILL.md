@@ -14,7 +14,7 @@ description: 智能股票分析工具。支持一个或多个股票批量分析�
   * 完整分析（默认）
   * 仅个股: `--no-market-review`
   * 仅大盘: `--market-review`
-  * 历史数据分析: 使用 `history_analysis.py`
+  * 个股历史数据分析: 使用 `history_analysis.py`
 
 ## 2. 前置检查
 
