@@ -599,6 +599,15 @@ class MarketAnalyzer:
         # 3. 生成复盘报告
         report = self.generate_market_review(overview, news)
 
+        # 4. 保存大盘数据到数据库
+        try:
+            from storage import get_db
+            db = get_db()
+            db.save_market_overview(overview)
+            logger.info("✅ 大盘数据已保存到数据库")
+        except Exception as e:
+            logger.warning(f"⚠️ 保存大盘数据失败: {e}")
+
         logger.info("========== 大盘复盘分析完成 ==========")
         
         return report

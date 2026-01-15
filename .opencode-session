@@ -1,0 +1,14 @@
+{
+  "session_id": "ai-1768469029-88563",
+  "ccb_session_id": "ai-1768469029-88563",
+  "runtime_dir": "/var/folders/65/5rshty290gzg25m1qkfyvrqh0000gn/T/claude-ai-lelouch/ai-1768469029-88563/opencode",
+  "terminal": "wezterm",
+  "tmux_session": null,
+  "pane_id": "1",
+  "pane_title_marker": "CCB-Opencode",
+  "work_dir": "/Users/lelouch/apps/daily_stock_analysis",
+  "active": false,
+  "started_at": "2026-01-15 17:23:49",
+  "start_cmd": "opencode; code=$?; echo; echo \"[opencode] exited with code $code. Press Enter to close...\"; read -r _; exit $code",
+  "ended_at": "2026-01-15 17:36:35"
+}
