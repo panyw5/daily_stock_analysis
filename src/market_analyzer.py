@@ -11,6 +11,8 @@
 """
 
 import logging
+import re
+import requests
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional, Dict, Any, List
@@ -22,6 +24,58 @@ from config import get_config
 from search_service import SearchService
 
 logger = logging.getLogger(__name__)
+
+
+def _fetch_qq_index_data(codes: List[str]) -> Dict[str, Dict]:
+    """
+    直接从腾讯接口获取指数数据（AkShare 备用方案）
+    
+    腾讯接口格式: v_sh000001="1~上证指数~000001~价格~昨收~开盘~成交量~...~涨跌额~涨跌幅~最高~最低~..."
+    """
+    result = {}
+    code_map = {
+        '000001': 'sh000001',
+        '399001': 'sz399001', 
+        '399006': 'sz399006',
+        '000688': 'sh000688',
+        '000016': 'sh000016',
+        '000300': 'sh000300',
+    }
+    
+    qq_codes = [code_map[c] for c in codes if c in code_map]
+    if not qq_codes:
+        return result
+        
+    try:
+        url = f"https://qt.gtimg.cn/q={','.join(qq_codes)}"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        resp = requests.get(url, headers=headers, timeout=10)
+        resp.encoding = 'gbk'
+        
+        for line in resp.text.strip().split(';'):
+            if not line.strip():
+                continue
+            match = re.match(r'v_(\w+)="(.+)"', line.strip())
+            if match:
+                qq_code = match.group(1)
+                data = match.group(2).split('~')
+                if len(data) >= 45:
+                    std_code = qq_code[2:]
+                    result[std_code] = {
+                        'name': data[1],
+                        'current': float(data[3]) if data[3] else 0,
+                        'prev_close': float(data[4]) if data[4] else 0,
+                        'open': float(data[5]) if data[5] else 0,
+                        'volume': float(data[6]) if data[6] else 0,
+                        'change': float(data[31]) if data[31] else 0,
+                        'change_pct': float(data[32]) if data[32] else 0,
+                        'high': float(data[33]) if data[33] else 0,
+                        'low': float(data[34]) if data[34] else 0,
+                    }
+    except Exception as e:
+        logger.warning(f"[大盘] 腾讯直连接口失败: {e}")
+    
+    return result
 
 
 @dataclass
@@ -216,36 +270,122 @@ class MarketAnalyzer:
                 # 获取实时数据
                 logger.info("[大盘] 获取主要指数实时行情...")
 
-                # 使用 akshare 获取指数行情
-                df = ak.stock_zh_index_spot_em()
+                # 优先使用东方财富数据源，失败则回退到新浪
+                df = None
+                data_source = None
+                
+                # 尝试东方财富数据源
+                try:
+                    df = ak.stock_zh_index_spot_em()
+                    if df is not None and not df.empty:
+                        data_source = 'eastmoney'
+                        logger.info("[大盘] 使用东方财富数据源获取指数行情")
+                except Exception as e:
+                    logger.warning(f"[大盘] 东方财富数据源失败: {e}，尝试新浪数据源...")
+                
+                # 回退到新浪数据源
+                if df is None or df.empty:
+                    try:
+                        df = ak.stock_zh_index_spot_sina()
+                        if df is not None and not df.empty:
+                            data_source = 'sina'
+                            logger.info("[大盘] 使用新浪数据源获取指数行情")
+                    except Exception as e:
+                        logger.warning(f"[大盘] 新浪数据源也失败: {e}，尝试腾讯直连...")
+                
+                # 最终回退：腾讯直连接口
+                if df is None or df.empty:
+                    qq_data = _fetch_qq_index_data(list(self.MAIN_INDICES.keys()))
+                    if qq_data:
+                        logger.info("[大盘] 使用腾讯直连接口获取指数行情")
+                        for code, name in self.MAIN_INDICES.items():
+                            if code in qq_data:
+                                d = qq_data[code]
+                                idx = MarketIndex(
+                                    code=code,
+                                    name=name,
+                                    current=d['current'],
+                                    change=d['change'],
+                                    change_pct=d['change_pct'],
+                                    open=d['open'],
+                                    high=d['high'],
+                                    low=d['low'],
+                                    prev_close=d['prev_close'],
+                                    volume=d['volume'],
+                                )
+                                if idx.prev_close > 0:
+                                    idx.amplitude = (idx.high - idx.low) / idx.prev_close * 100
+                                indices.append(idx)
+                        logger.info(f"[大盘] 获取到 {len(indices)} 个指数行情")
+                        return indices
 
                 if df is not None and not df.empty:
+                    # 新浪数据源的代码格式不同，需要映射
+                    sina_code_map = {
+                        '000001': 'sh000001',
+                        '399001': 'sz399001',
+                        '399006': 'sz399006',
+                        '000688': 'sh000688',
+                        '000016': 'sh000016',
+                        '000300': 'sh000300',
+                    }
+                    
                     for code, name in self.MAIN_INDICES.items():
-                        # 查找对应指数
-                        row = df[df['代码'] == code]
-                        if row.empty:
-                            # 尝试带前缀查找
-                            row = df[df['代码'].str.contains(code)]
+                        row = None
+                        
+                        if data_source == 'eastmoney':
+                            # 东方财富格式
+                            row = df[df['代码'] == code]
+                            if row.empty:
+                                row = df[df['代码'].str.contains(code)]
+                        elif data_source == 'sina':
+                            # 新浪格式：代码带前缀如 sh000001
+                            sina_code = sina_code_map.get(code)
+                            if sina_code:
+                                row = df[df['代码'] == sina_code]
 
-                        if not row.empty:
+                        if row is not None and not row.empty:
                             row = row.iloc[0]
-                            index = MarketIndex(
-                                code=code,
-                                name=name,
-                                current=float(row.get('最新价', 0) or 0),
-                                change=float(row.get('涨跌额', 0) or 0),
-                                change_pct=float(row.get('涨跌幅', 0) or 0),
-                                open=float(row.get('今开', 0) or 0),
-                                high=float(row.get('最高', 0) or 0),
-                                low=float(row.get('最低', 0) or 0),
-                                prev_close=float(row.get('昨收', 0) or 0),
-                                volume=float(row.get('成交量', 0) or 0),
-                                amount=float(row.get('成交额', 0) or 0),
-                            )
-                            # 计算振幅
-                            if index.prev_close > 0:
-                                index.amplitude = (index.high - index.low) / index.prev_close * 100
-                            indices.append(index)
+                            
+                            index: Optional[MarketIndex] = None
+                            if data_source == 'eastmoney':
+                                index = MarketIndex(
+                                    code=code,
+                                    name=name,
+                                    current=float(row.get('最新价', 0) or 0),
+                                    change=float(row.get('涨跌额', 0) or 0),
+                                    change_pct=float(row.get('涨跌幅', 0) or 0),
+                                    open=float(row.get('今开', 0) or 0),
+                                    high=float(row.get('最高', 0) or 0),
+                                    low=float(row.get('最低', 0) or 0),
+                                    prev_close=float(row.get('昨收', 0) or 0),
+                                    volume=float(row.get('成交量', 0) or 0),
+                                    amount=float(row.get('成交额', 0) or 0),
+                                )
+                            elif data_source == 'sina':
+                                current = float(row.get('最新价', 0) or 0)
+                                prev_close = float(row.get('昨收', 0) or 0)
+                                change = current - prev_close if prev_close > 0 else 0
+                                change_pct = float(row.get('涨跌幅', 0) or 0)
+                                
+                                index = MarketIndex(
+                                    code=code,
+                                    name=name,
+                                    current=current,
+                                    change=change,
+                                    change_pct=change_pct,
+                                    open=float(row.get('今开', 0) or 0),
+                                    high=float(row.get('最高', 0) or 0),
+                                    low=float(row.get('最低', 0) or 0),
+                                    prev_close=prev_close,
+                                    volume=float(row.get('成交量', 0) or 0),
+                                    amount=float(row.get('成交额', 0) or 0),
+                                )
+                            
+                            if index is not None:
+                                if index.prev_close > 0:
+                                    index.amplitude = (index.high - index.low) / index.prev_close * 100
+                                indices.append(index)
 
             logger.info(f"[大盘] 获取到 {len(indices)} 个指数行情")
 
@@ -259,11 +399,24 @@ class MarketAnalyzer:
         try:
             logger.info("[大盘] 获取市场涨跌统计...")
             
-            # 获取全部A股实时行情
-            df = ak.stock_zh_a_spot_em()
+            df = None
+            
+            try:
+                df = ak.stock_zh_a_spot_em()
+                if df is not None and not df.empty:
+                    logger.info("[大盘] 使用东方财富数据源获取涨跌统计")
+            except Exception as e:
+                logger.warning(f"[大盘] 东方财富数据源失败: {e}，尝试腾讯数据源...")
+            
+            if df is None or df.empty:
+                try:
+                    df = ak.stock_zh_a_spot()
+                    if df is not None and not df.empty:
+                        logger.info("[大盘] 使用腾讯数据源获取涨跌统计")
+                except Exception as e:
+                    logger.error(f"[大盘] 腾讯数据源也失败: {e}")
             
             if df is not None and not df.empty:
-                # 涨跌统计
                 change_col = '涨跌幅'
                 if change_col in df.columns:
                     df[change_col] = pd.to_numeric(df[change_col], errors='coerce')
@@ -271,15 +424,13 @@ class MarketAnalyzer:
                     overview.down_count = len(df[df[change_col] < 0])
                     overview.flat_count = len(df[df[change_col] == 0])
                     
-                    # 涨停跌停统计（涨跌幅 >= 9.9% 或 <= -9.9%）
                     overview.limit_up_count = len(df[df[change_col] >= 9.9])
                     overview.limit_down_count = len(df[df[change_col] <= -9.9])
                 
-                # 两市成交额
                 amount_col = '成交额'
                 if amount_col in df.columns:
                     df[amount_col] = pd.to_numeric(df[amount_col], errors='coerce')
-                    overview.total_amount = df[amount_col].sum() / 1e8  # 转为亿元
+                    overview.total_amount = df[amount_col].sum() / 1e8
                 
                 logger.info(f"[大盘] 涨:{overview.up_count} 跌:{overview.down_count} 平:{overview.flat_count} "
                           f"涨停:{overview.limit_up_count} 跌停:{overview.limit_down_count} "
@@ -293,26 +444,40 @@ class MarketAnalyzer:
         try:
             logger.info("[大盘] 获取板块涨跌榜...")
             
-            # 获取行业板块行情
-            df = ak.stock_board_industry_name_em()
+            df = None
+            name_col = '板块名称'
+            
+            try:
+                df = ak.stock_board_industry_name_em()
+                if df is not None and not df.empty:
+                    logger.info("[大盘] 使用东方财富数据源获取板块行情")
+            except Exception as e:
+                logger.warning(f"[大盘] 东方财富板块数据源失败: {e}，尝试概念板块...")
+            
+            if df is None or df.empty:
+                try:
+                    df = ak.stock_board_concept_name_em()
+                    name_col = '板块名称'
+                    if df is not None and not df.empty:
+                        logger.info("[大盘] 使用东方财富概念板块数据源")
+                except Exception as e:
+                    logger.error(f"[大盘] 概念板块数据源也失败: {e}")
             
             if df is not None and not df.empty:
                 change_col = '涨跌幅'
-                if change_col in df.columns:
+                if change_col in df.columns and name_col in df.columns:
                     df[change_col] = pd.to_numeric(df[change_col], errors='coerce')
                     df = df.dropna(subset=[change_col])
                     
-                    # 涨幅前5
                     top = df.nlargest(5, change_col)
                     overview.top_sectors = [
-                        {'name': row['板块名称'], 'change_pct': row[change_col]}
+                        {'name': row[name_col], 'change_pct': row[change_col]}
                         for _, row in top.iterrows()
                     ]
                     
-                    # 跌幅前5
                     bottom = df.nsmallest(5, change_col)
                     overview.bottom_sectors = [
-                        {'name': row['板块名称'], 'change_pct': row[change_col]}
+                        {'name': row[name_col], 'change_pct': row[change_col]}
                         for _, row in bottom.iterrows()
                     ]
                     
@@ -327,18 +492,31 @@ class MarketAnalyzer:
         try:
             logger.info("[大盘] 获取北向资金...")
             
-            # 获取北向资金数据
-            df = ak.stock_hsgt_north_net_flow_in_em(symbol="北上")
+            north_flow_total = 0.0
             
-            if df is not None and not df.empty:
-                # 取最新一条数据
-                latest = df.iloc[-1]
-                if '当日净流入' in df.columns:
-                    overview.north_flow = float(latest['当日净流入']) / 1e8  # 转为亿元
-                elif '净流入' in df.columns:
-                    overview.north_flow = float(latest['净流入']) / 1e8
-                    
+            for symbol in ['沪股通', '深股通']:
+                try:
+                    df = ak.stock_hsgt_hist_em(symbol=symbol)
+                    if df is not None and not df.empty:
+                        latest = df.iloc[-1]
+                        flow_col = None
+                        for col in ['当日资金流入', '当日净流入', '净流入']:
+                            if col in df.columns:
+                                flow_col = col
+                                break
+                        if flow_col:
+                            flow_value = latest.get(flow_col, 0)
+                            if pd.notna(flow_value):
+                                north_flow_total += float(flow_value)
+                except Exception as e:
+                    logger.debug(f"[大盘] 获取 {symbol} 数据失败: {e}")
+                    continue
+            
+            if north_flow_total != 0:
+                overview.north_flow = north_flow_total / 1e8
                 logger.info(f"[大盘] 北向资金净流入: {overview.north_flow:.2f}亿")
+            else:
+                logger.warning("[大盘] 未能获取到北向资金数据")
                 
         except Exception as e:
             logger.warning(f"[大盘] 获取北向资金失败: {e}")
