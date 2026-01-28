@@ -797,11 +797,15 @@ class GeminiAnalyzer:
                 if hasattr(self._model, 'model_name'):
                     model_name = self._model.model_name
             
+            # 获取 API 类型名称（用于日志显示）
+            api_type = "OpenAI 兼容 API" if self._use_openai else "Gemini API"
+
             logger.info(f"========== AI 分析 {name}({code}) ==========")
+            logger.info(f"[LLM配置] API类型: {api_type}")
             logger.info(f"[LLM配置] 模型: {model_name}")
             logger.info(f"[LLM配置] Prompt 长度: {len(prompt)} 字符")
             logger.info(f"[LLM配置] 是否包含新闻: {'是' if news_context else '否'}")
-            
+
             # 记录完整 prompt 到日志（INFO级别记录摘要，DEBUG记录完整）
             prompt_preview = prompt[:500] + "..." if len(prompt) > 500 else prompt
             logger.info(f"[LLM Prompt 预览]\n{prompt_preview}")
@@ -814,20 +818,20 @@ class GeminiAnalyzer:
                 "max_output_tokens": 8192,
             }
 
-            logger.info(f"[LLM调用] 开始调用 Gemini API (temperature={generation_config['temperature']}, max_tokens={generation_config['max_output_tokens']})...")
-            
+            logger.info(f"[LLM调用] 开始调用 {api_type} (temperature={generation_config['temperature']}, max_tokens={generation_config['max_output_tokens']})...")
+
             # 使用带重试的 API 调用
             start_time = time.time()
             response_text = self._call_api_with_retry(prompt, generation_config)
             elapsed = time.time() - start_time
-            
+
             # 记录响应信息
-            logger.info(f"[LLM返回] Gemini API 响应成功, 耗时 {elapsed:.2f}s, 响应长度 {len(response_text)} 字符")
-            
+            logger.info(f"[LLM返回] {api_type} 响应成功, 耗时 {elapsed:.2f}s, 响应长度 {len(response_text)} 字符")
+
             # 记录响应预览（INFO级别）和完整响应（DEBUG级别）
             response_preview = response_text[:300] + "..." if len(response_text) > 300 else response_text
             logger.info(f"[LLM返回 预览]\n{response_preview}")
-            logger.debug(f"=== Gemini 完整响应 ({len(response_text)}字符) ===\n{response_text}\n=== End Response ===")
+            logger.debug(f"=== {api_type} 完整响应 ({len(response_text)}字符) ===\n{response_text}\n=== End Response ===")
             
             # 解析响应
             result = self._parse_response(response_text, code, name)
