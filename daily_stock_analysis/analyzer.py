@@ -26,7 +26,7 @@ from tenacity import (
 )
 from demjson3 import decode as demjson_decode
 
-from src.config import get_config
+from daily_stock_analysis.config import get_config
 
 logger = logging.getLogger(__name__)
 

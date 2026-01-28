@@ -29,7 +29,7 @@ from tenacity import (
 )
 
 from .base import BaseFetcher, DataFetchError, RateLimitError, STANDARD_COLUMNS
-from src.config import get_config
+from daily_stock_analysis.config import get_config
 
 logger = logging.getLogger(__name__)
 

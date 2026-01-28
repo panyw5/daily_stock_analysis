@@ -40,7 +40,7 @@ class DingtalkPlatform(BotPlatform):
     """
     
     def __init__(self):
-        from src.config import get_config
+        from daily_stock_analysis.config import get_config
         config = get_config()
         
         self._app_key = getattr(config, 'dingtalk_app_key', None)

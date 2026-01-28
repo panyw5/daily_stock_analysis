@@ -13,12 +13,12 @@ A股自选股智能分析系统 - 分析服务层
 
 from typing import List, Optional
 
-from src.analyzer import AnalysisResult
-from src.config import get_config, Config
-from src.notification import NotificationService
-from src.enums import ReportType
-from src.core.pipeline import StockAnalysisPipeline
-from src.core.market_review import run_market_review
+from daily_stock_analysis.analyzer import AnalysisResult
+from daily_stock_analysis.config import get_config, Config
+from daily_stock_analysis.notification import NotificationService
+from daily_stock_analysis.enums import ReportType
+from daily_stock_analysis.core.pipeline import StockAnalysisPipeline
+from daily_stock_analysis.core.market_review import run_market_review
 
 
 

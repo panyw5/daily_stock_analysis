@@ -39,16 +39,16 @@ from datetime import datetime, date, timezone, timedelta
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
-from src.feishu_doc import FeishuDocManager
-from src.config import get_config, Config
-from src.storage import get_db, DatabaseManager
+from daily_stock_analysis.feishu_doc import FeishuDocManager
+from daily_stock_analysis.config import get_config, Config
+from daily_stock_analysis.storage import get_db, DatabaseManager
 from data_provider import DataFetcherManager
 from data_provider.akshare_fetcher import AkshareFetcher, RealtimeQuote, ChipDistribution
-from src.analyzer import GeminiAnalyzer, AnalysisResult, STOCK_NAME_MAP
-from src.notification import NotificationService, NotificationChannel, send_daily_report
-from src.search_service import SearchService, SearchResponse
-from src.stock_analyzer import StockTrendAnalyzer, TrendAnalysisResult
-from src.market_analyzer import MarketAnalyzer
+from daily_stock_analysis.analyzer import GeminiAnalyzer, AnalysisResult, STOCK_NAME_MAP
+from daily_stock_analysis.notification import NotificationService, NotificationChannel, send_daily_report
+from daily_stock_analysis.search_service import SearchService, SearchResponse
+from daily_stock_analysis.stock_analyzer import StockTrendAnalyzer, TrendAnalysisResult
+from daily_stock_analysis.market_analyzer import MarketAnalyzer
 
 # 配置日志格式
 LOG_FORMAT = '%(asctime)s | %(levelname)-8s | %(name)-20s | %(message)s'
