@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from itertools import cycle
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logger = logging.getLogger(__name__)
 
@@ -765,23 +766,27 @@ class SearchService:
         self, stock_code: str, stock_name: str, max_searches: int = 3
     ) -> Dict[str, SearchResponse]:
         """
-        多维度情报搜索（同时使用多个引擎、多个维度）
+        多维度情报搜索（并行使用所有可用引擎）
 
         搜索维度：
         1. 最新消息 - 近期新闻动态
         2. 风险排查 - 减持、处罚、利空
         3. 业绩预期 - 年报预告、业绩快报
 
+        改进：
+        - 所有可用的搜索引擎（华尔街见闻、Tavily、Exa、SerpAPI）并行搜索
+        - 单个引擎失败不影响其他引擎
+        - 聚合所有引擎的结果
+
         Args:
             stock_code: 股票代码
             stock_name: 股票名称
-            max_searches: 最大搜索次数
+            max_searches: 最大搜索次数（已废弃，保留参数兼容性）
 
         Returns:
             {维度名称: SearchResponse} 字典
         """
         results = {}
-        search_count = 0
 
         # 定义搜索维度
         search_dimensions = [
@@ -804,40 +809,115 @@ class SearchService:
 
         logger.info(f"开始多维度情报搜索: {stock_name}({stock_code})")
 
-        # 轮流使用不同的搜索引擎
-        provider_index = 0
+        # 获取所有可用的搜索引擎
+        available_providers = [p for p in self._providers if p.is_available]
+        if not available_providers:
+            logger.warning("没有可用的搜索引擎")
+            return results
 
+        logger.info(f"可用搜索引擎: {[p.name for p in available_providers]}")
+
+        # 对每个维度，并行使用所有搜索引擎
         for dim in search_dimensions:
-            if search_count >= max_searches:
-                break
+            logger.info(
+                f"[情报搜索] {dim['desc']}: 并行使用 {len(available_providers)} 个搜索引擎"
+            )
 
-            # 选择搜索引擎（轮流使用）
-            available_providers = [p for p in self._providers if p.is_available]
-            if not available_providers:
-                break
+            # 并行搜索
+            dimension_results = []
+            with ThreadPoolExecutor(max_workers=len(available_providers)) as executor:
+                # 提交所有搜索任务
+                future_to_provider = {
+                    executor.submit(
+                        self._safe_search, provider, dim["query"], 3
+                    ): provider
+                    for provider in available_providers
+                }
 
-            provider = available_providers[provider_index % len(available_providers)]
-            provider_index += 1
+                # 收集结果
+                for future in as_completed(future_to_provider):
+                    provider = future_to_provider[future]
+                    try:
+                        response = future.result()
+                        if response.success and response.results:
+                            logger.info(
+                                f"[情报搜索] {dim['desc']}: {provider.name} 成功获取 {len(response.results)} 条结果"
+                            )
+                            dimension_results.extend(response.results)
+                        else:
+                            logger.warning(
+                                f"[情报搜索] {dim['desc']}: {provider.name} 搜索失败 - {response.error_message}"
+                            )
+                    except Exception as e:
+                        logger.error(
+                            f"[情报搜索] {dim['desc']}: {provider.name} 执行异常 - {str(e)}"
+                        )
 
-            logger.info(f"[情报搜索] {dim['desc']}: 使用 {provider.name}")
+            # 聚合结果（去重 + 按时间排序）
+            if dimension_results:
+                # 简单去重：基于标题
+                seen_titles = set()
+                unique_results = []
+                for result in dimension_results:
+                    if result.title not in seen_titles:
+                        seen_titles.add(result.title)
+                        unique_results.append(result)
 
-            response = provider.search(dim["query"], max_results=3)
-            results[dim["name"]] = response
-            search_count += 1
+                # 按发布时间排序（有时间的排前面）
+                unique_results.sort(
+                    key=lambda x: (x.published_date is None, x.published_date or ""),
+                    reverse=True,
+                )
 
-            if response.success:
+                # 创建聚合响应
+                provider_names = [p.name for p in available_providers]
+                results[dim["name"]] = SearchResponse(
+                    query=dim["query"],
+                    results=unique_results[:10],  # 最多保留10条
+                    provider=f"聚合({', '.join(provider_names)})",
+                    success=True,
+                )
                 logger.info(
-                    f"[情报搜索] {dim['desc']}: 获取 {len(response.results)} 条结果"
+                    f"[情报搜索] {dim['desc']}: 聚合完成，共 {len(unique_results)} 条结果（去重后）"
                 )
             else:
-                logger.warning(
-                    f"[情报搜索] {dim['desc']}: 搜索失败 - {response.error_message}"
+                # 所有引擎都失败
+                results[dim["name"]] = SearchResponse(
+                    query=dim["query"],
+                    results=[],
+                    provider="None",
+                    success=False,
+                    error_message="所有搜索引擎都未返回结果",
                 )
-
-            # 短暂延迟避免请求过快
-            time.sleep(0.5)
+                logger.warning(f"[情报搜索] {dim['desc']}: 所有搜索引擎都未返回结果")
 
         return results
+
+    def _safe_search(
+        self, provider: BaseSearchProvider, query: str, max_results: int
+    ) -> SearchResponse:
+        """
+        安全的搜索包装（捕获所有异常）
+
+        Args:
+            provider: 搜索引擎
+            query: 搜索查询
+            max_results: 最大结果数
+
+        Returns:
+            SearchResponse（失败时返回空结果）
+        """
+        try:
+            return provider.search(query, max_results)
+        except Exception as e:
+            logger.error(f"[{provider.name}] 搜索异常: {str(e)}")
+            return SearchResponse(
+                query=query,
+                results=[],
+                provider=provider.name,
+                success=False,
+                error_message=f"搜索异常: {str(e)}",
+            )
 
     def format_intel_report(
         self, intel_results: Dict[str, SearchResponse], stock_name: str
@@ -859,12 +939,13 @@ class SearchService:
             resp = intel_results["latest_news"]
             lines.append(f"\n📰 最新消息 (来源: {resp.provider}):")
             if resp.success and resp.results:
-                for i, r in enumerate(resp.results[:3], 1):
+                for i, r in enumerate(resp.results[:5], 1):  # 显示前5条
                     date_str = f" [{r.published_date}]" if r.published_date else ""
                     lines.append(f"  {i}. {r.title}{date_str}")
                     lines.append(f"     {r.snippet[:100]}...")
+                lines.append(f"  (共 {len(resp.results)} 条结果)")
             else:
-                lines.append("  未找到相关消息")
+                lines.append(f"  未找到相关消息 ({resp.error_message or '无结果'})")
 
         # 风险排查
         if "risk_check" in intel_results:
@@ -874,8 +955,9 @@ class SearchService:
                 for i, r in enumerate(resp.results[:3], 1):
                     lines.append(f"  {i}. {r.title}")
                     lines.append(f"     {r.snippet[:100]}...")
+                lines.append(f"  (共 {len(resp.results)} 条结果)")
             else:
-                lines.append("  未发现明显风险信号")
+                lines.append(f"  未发现明显风险信号 ({resp.error_message or '无结果'})")
 
         # 业绩预期
         if "earnings" in intel_results:
@@ -885,8 +967,9 @@ class SearchService:
                 for i, r in enumerate(resp.results[:3], 1):
                     lines.append(f"  {i}. {r.title}")
                     lines.append(f"     {r.snippet[:100]}...")
+                lines.append(f"  (共 {len(resp.results)} 条结果)")
             else:
-                lines.append("  未找到业绩相关信息")
+                lines.append(f"  未找到业绩相关信息 ({resp.error_message or '无结果'})")
 
         return "\n".join(lines)
 
