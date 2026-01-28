@@ -22,10 +22,13 @@
 - **零成本部署** - GitHub Actions 免费运行，无需服务器
 - **💰 白嫖 Gemini API** - Google AI Studio 提供免费额度，个人使用完全够用
 - **🔄 多模型支持** - 支持 OpenAI 兼容 API（DeepSeek、通义千问等）作为备选
+- **🆓 免费新闻源** - 华尔街见闻 7x24 实时快讯，无需 API Key
 
 ### 📊 数据来源
 - **行情数据**: AkShare（免费）、Tushare、Baostock、YFinance
-- **新闻搜索**: Tavily、Exa、SerpAPI、Bocha
+- **新闻搜索**: 
+  - 主力：华尔街见闻 7x24 快讯（**完全免费，无需配置**）
+  - 备选：Tavily、Exa、SerpAPI、Bocha
 - **AI 分析**: 
   - 主力：Google Gemini（gemini-3-flash-preview）—— [免费获取](https://aistudio.google.com/)
   - 备选：应大家要求，也支持了OpenAI 兼容 API（DeepSeek、通义千问、Moonshot 等）
@@ -88,11 +91,16 @@
 | Secret 名称 | 说明 | 必填 |
 |------------|------|:----:|
 | `STOCK_LIST` | 自选股代码，如 `600519,hk00700,AAPL,TSLA` | ✅ |
-| `TAVILY_API_KEYS` | [Tavily](https://tavily.com/) 搜索 API（新闻搜索） | 推荐 |
-| `BOCHA_API_KEYS` | [博查搜索](https://open.bocha.cn/) Web Search API（中文搜索优化，支持AI摘要，多个key用逗号分隔） | 可选 |
-| `EXA_API_KEYS` | [Exa](https://exa.ai/) 搜索 API（AI 优化的搜索引擎） | 可选 |
-| `SERPAPI_API_KEYS` | [SerpAPI](https://serpapi.com/) 备用搜索 | 可选 |
 | `TUSHARE_TOKEN` | [Tushare Pro](https://tushare.pro/) Token | 可选 |
+
+> 💡 **新闻搜索说明**：系统已内置华尔街见闻 7x24 快讯（完全免费），无需配置任何 API Key 即可获取实时财经新闻。以下搜索引擎作为备选，可选配置。
+
+| Secret 名称 | 说明 | 必填 |
+|------------|------|:----:|
+| `TAVILY_API_KEYS` | [Tavily](https://tavily.com/) 搜索 API（备用新闻搜索，1000次/月） | 可选 |
+| `EXA_API_KEYS` | [Exa](https://exa.ai/) 搜索 API（AI 优化的搜索引擎） | 可选 |
+| `BOCHA_API_KEYS` | [博查搜索](https://open.bocha.cn/) Web Search API（中文搜索优化，支持AI摘要） | 可选 |
+| `SERPAPI_API_KEYS` | [SerpAPI](https://serpapi.com/) 备用搜索（100次/月） | 可选 |
 
 #### 3. 启用 Actions
 
@@ -153,6 +161,27 @@
 ## ⚙️ 配置说明
 
 > 📖 完整环境变量、定时任务配置请参考 [完整配置指南](docs/full-guide.md)
+
+## 🆓 免费资源说明
+
+本项目致力于降低使用门槛，提供多种免费资源：
+
+### 完全免费（无需配置）
+- ✅ **华尔街见闻** - 7x24 实时财经快讯，系统已内置
+- ✅ **AkShare** - 免费行情数据接口
+
+### 免费额度（需注册）
+- 🔑 **Google Gemini** - 免费 API，个人使用完全够用
+- 🔑 **Tavily** - 1000次/月免费搜索
+- 🔑 **SerpAPI** - 100次/月免费搜索
+
+### 推荐配置
+对于个人用户，推荐以下最小配置即可正常使用：
+1. 注册 Google Gemini API（免费）
+2. 使用华尔街见闻获取新闻（无需配置）
+3. 配置一个通知渠道（企业微信/飞书/Telegram）
+
+**总成本：0 元** 🎉
 
 ## 🖥️ 本地 WebUI（可选）
 
@@ -230,6 +259,7 @@ daily_stock_analysis/
 - [x] Tushare Pro
 - [x] Baostock
 - [x] YFinance
+- [x] 华尔街见闻（7x24 快讯，免费）
 
 ### 🎯 功能增强
 - [x] 决策仪表盘
