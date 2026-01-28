@@ -6,8 +6,8 @@
 
 import sys
 import logging
-from src.search_service import SearchService
-from src.config import get_config
+from daily_stock_analysis.search_service import SearchService
+from daily_stock_analysis.config import get_config
 
 # 配置日志
 logging.basicConfig(

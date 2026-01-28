@@ -314,7 +314,7 @@ def get_dispatcher() -> CommandDispatcher:
     global _dispatcher
     
     if _dispatcher is None:
-        from src.config import get_config
+        from daily_stock_analysis.config import get_config
         
         config = get_config()
         

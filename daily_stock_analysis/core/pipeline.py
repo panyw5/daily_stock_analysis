@@ -17,15 +17,15 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 from typing import List, Dict, Any, Optional, Tuple
 
-from src.config import get_config, Config
-from src.storage import get_db
+from daily_stock_analysis.config import get_config, Config
+from daily_stock_analysis.storage import get_db
 from data_provider import DataFetcherManager
 from data_provider.realtime_types import ChipDistribution
-from src.analyzer import GeminiAnalyzer, AnalysisResult, STOCK_NAME_MAP
-from src.notification import NotificationService, NotificationChannel
-from src.search_service import SearchService
-from src.enums import ReportType
-from src.stock_analyzer import StockTrendAnalyzer, TrendAnalysisResult
+from daily_stock_analysis.analyzer import GeminiAnalyzer, AnalysisResult, STOCK_NAME_MAP
+from daily_stock_analysis.notification import NotificationService, NotificationChannel
+from daily_stock_analysis.search_service import SearchService
+from daily_stock_analysis.enums import ReportType
+from daily_stock_analysis.stock_analyzer import StockTrendAnalyzer, TrendAnalysisResult
 from bot.models import BotMessage
 
 

@@ -34,8 +34,8 @@ try:
 except ImportError:
     discord_available = False
 
-from src.config import get_config
-from src.analyzer import AnalysisResult
+from daily_stock_analysis.config import get_config
+from daily_stock_analysis.analyzer import AnalysisResult
 from bot.models import BotMessage
 
 logger = logging.getLogger(__name__)
@@ -2545,7 +2545,7 @@ class NotificationService:
                 logger.warning("飞书 SDK 不可用，无法发送 Stream 回复")
                 return False
             
-            from src.config import get_config
+            from daily_stock_analysis.config import get_config
             config = get_config()
             
             app_id = getattr(config, 'feishu_app_id', None)

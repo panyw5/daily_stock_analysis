@@ -14,10 +14,10 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from src.notification import NotificationService
-from src.market_analyzer import MarketAnalyzer
-from src.search_service import SearchService
-from src.analyzer import GeminiAnalyzer
+from daily_stock_analysis.notification import NotificationService
+from daily_stock_analysis.market_analyzer import MarketAnalyzer
+from daily_stock_analysis.search_service import SearchService
+from daily_stock_analysis.analyzer import GeminiAnalyzer
 
 
 logger = logging.getLogger(__name__)
