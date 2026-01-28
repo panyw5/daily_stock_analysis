@@ -23,12 +23,14 @@
 - **💰 白嫖 Gemini API** - Google AI Studio 提供免费额度，个人使用完全够用
 - **🔄 多模型支持** - 支持 OpenAI 兼容 API（DeepSeek、通义千问等）作为备选
 - **🆓 免费新闻源** - 华尔街见闻 7x24 实时快讯，无需 API Key
+- **⚡ 并行搜索引擎** - 所有搜索引擎同时工作，结果更全面，速度更快
 
 ### 📊 数据来源
 - **行情数据**: AkShare（免费）、Tushare、Baostock、YFinance
-- **新闻搜索**: 
+- **新闻搜索**（并行搜索，结果聚合）: 
   - 主力：华尔街见闻 7x24 快讯（**完全免费，无需配置**）
   - 备选：Tavily、Exa、SerpAPI、Bocha
+  - 特性：所有可用引擎并行搜索，单个失败不影响整体
 - **AI 分析**: 
   - 主力：Google Gemini（gemini-3-flash-preview）—— [免费获取](https://aistudio.google.com/)
   - 备选：应大家要求，也支持了OpenAI 兼容 API（DeepSeek、通义千问、Moonshot 等）
@@ -112,7 +114,7 @@
 
 #### 5. 完成！
 
-默认每个工作日 **18:00（北京时间）** 自动执行
+**注意**：默认定时任务已关闭，需要手动触发分析。如需启用自动运行，请编辑 `.github/workflows/daily_analysis.yml` 取消注释 `schedule` 部分。
 
 ### 方式二：本地运行 / Docker 部署
 
@@ -264,11 +266,12 @@ daily_stock_analysis/
 ### 🎯 功能增强
 - [x] 决策仪表盘
 - [x] 大盘复盘
-- [x] 定时推送
+- [x] 定时推送（可配置）
 - [x] GitHub Actions
 - [x] 港股支持
 - [x] Web 管理界面 (简易版)
 - [x] 美股支持
+- [x] 并行搜索引擎（多源聚合，容错设计）
 - [ ] 历史分析回测
 
 ## 🤝 贡献
